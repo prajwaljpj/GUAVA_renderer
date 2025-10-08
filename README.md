@@ -18,6 +18,7 @@
 
 [![Project Page](https://img.shields.io/badge/🌐-Project_Page-blueviolet)](https://eastbeanzhang.github.io/GUAVA/)
 [![arXiv Paper](https://img.shields.io/badge/📜-arXiv:2505-03351)](https://arxiv.org/abs/2505.03351)
+[![EHM Tracker](https://img.shields.io/badge/🎯-EHM_Tracker-slategray)](https://github.com/Pixel-Talk/EHM-Tracker/)
 [![Youtube](https://img.shields.io/badge/▶️-Youtube-red)](https://www.youtube.com/watch?v=ylyTO34l5d0)
 [![Bilibili](https://img.shields.io/badge/📺-Bilibili-00a1d6)](https://www.bilibili.com/video/BV1k45AzaEpW)
 
@@ -27,8 +28,8 @@
 ## 🗓️ Roadmap
 Here's our current progress and upcoming plans for the GUAVA:
 * **Inference Code:** Released on August 10, 2025 ☑️
-* **Tracking Code:** Coming soon! (For custom video or image)
-* **Training Code:** Coming soon!
+* **Tracking Code:** Released on October 08, 2025 ☑️
+* **Training Code:** Released on October 08, 2025 ☑️
 
 ## 📌 Introduction
 This repository contains the official author's implementation associated with the paper "GUAVA: Generalizable Upper Body 3D Gaussian Avatar".
@@ -52,10 +53,10 @@ This guide outlines the steps to set up and run the project components, which ha
 #### Cloning the Repository
 ```shell
 # Via SSH
-git clone git@github.com:Pixel-Talk/GUAVA.git
+git clone git@github.com:Pixel-Talk/GUAVA.git --recursive
 or
 # Via HTTPS 
-git clone https://github.com/Pixel-Talk/GUAVA.git
+git clone https://github.com/Pixel-Talk/GUAVA.git --recursive
 
 cd GUAVA
 ```
@@ -80,7 +81,7 @@ conda activate GUAVA
 pip install -r requirements.txt
 
 # Install PyTorch3D:
-conda install -c pytorch3d pytorch3d==0.7.7
+pip install "git+https://github.com/facebookresearch/pytorch3d.git@v0.7.7"
 
 # Install Submodule Dependencies:
 cd submodules
@@ -132,6 +133,30 @@ Execute this command to perform cross-reenactment, transferring the motion and e
  --skip_self_act \
  --render_cross_act
 ```
+
+## 🎯 Tracking
+To process your own videos, images, or to build a custom tracking training dataset, you will need to use our [EHM-Tracker](https://github.com/Pixel-Talk/EHM-Tracker).
+
+Navigate into the EHM-Tracker directory and follow the instructions provided in its [README.md](EHM-Tracker/README.md) file for detailed guidance.
+
+
+## 🚂 Training Scripts
+You can use the EHM-Tracker to build your own dataset.
+
+Once your dataset is prepared, run the following command to train your own GUAVA model.
+```shell
+python main/train.py -c train/ubody_512 -d '0,1'
+```
+
+
+## 🖥️ Interface Demo
+After setting up the environment, necessary files, and the EHM-Tracker, you can try our interactive demo by running:
+
+```shell
+python app.py
+```
+![GUAVA Interface Demo](assets/Docs/app.png)
+
 
 ## 📖 BibTeX
 If you find our work helpful, please ⭐ our repository and cite:

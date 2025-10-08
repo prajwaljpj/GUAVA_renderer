@@ -5,27 +5,32 @@ from pathlib import Path
 from functools import partial
 import subprocess
 
+# --- Constants ---
 OUTPUT_DIR = 'outputs/app'
 OUTNAME = 'render'
 DEVICES = '0'
+EHM_TRACKER_DIR = 'EHM-Tracker' # Define the tracker directory
 
 TRACKED_IMG_DIR = 'assets/example/tracked_image'
 TRACKED_VID_DIR = 'assets/example/tracked_video'
-tracked_images_list = os.listdir(TRACKED_IMG_DIR)
-tracked_videos_list = os.listdir(TRACKED_VID_DIR)
+
+# --- Core Functions ---
 
 def run_cmd(command, current_dir=None):
+    """Executes a shell command and streams its output."""
     print(f"▶️ Executing command:\n{command}", flush=True)
+    print(f"▶️ Working directory: {current_dir or os.getcwd()}", flush=True)
     process = subprocess.Popen(
         command,
         shell=True,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         cwd=current_dir,
-        bufsize=1 
+        bufsize=1
     )
-    
+
+    # Stream stdout
     if process.stdout:
         for line in iter(process.stdout.readline, ''):
             print(line, end='', flush=True)
@@ -33,132 +38,169 @@ def run_cmd(command, current_dir=None):
 
     return_code = process.wait()
 
+    # Handle errors
     if return_code != 0:
         print(f"‼️ Command failed with return code {return_code}", flush=True)
-        if process.stderr:
-            error_output = process.stderr.read()
-            print(f"Error output:\n{error_output}", flush=True)
-            process.stderr.close()
         raise subprocess.CalledProcessError(return_code, command)
-        
+
     print(f"✅ Command executed successfully.", flush=True)
 
 
-def check_process_status(source_image, driven_video):
-    """Check if the processing is complete and return the result video if available"""
-    if not OUTPUT_DIR or not os.path.exists(OUTPUT_DIR):
-        return "Processing hasn't started yet.", None
-    
-    src_name = os.path.splitext(os.path.basename(source_image))[0]
-    dst_name = os.path.splitext(os.path.basename(driven_video))[0]
-        
-    output_file =  os.path.join(OUTPUT_DIR, f'{OUTNAME}_cross_act', src_name, f'{src_name}_{dst_name}', f'{src_name}_{dst_name}_video.mp4')
+def master_check_status(source_selection, source_upload, driven_selection, driven_upload):
+    """
+    Checks the processing status based on the combination of gallery and uploaded inputs.
+    """
+    src_name, dst_name = None, None
+
+    if source_upload:
+        src_name = os.path.splitext(os.path.basename(source_upload))[0]
+    elif source_selection:
+        src_name = source_selection['caption']
+    else:
+        return "Please provide a source to check.", None
+
+    if driven_upload:
+        dst_name = os.path.splitext(os.path.basename(driven_upload))[0]
+    elif driven_selection:
+        dst_name = driven_selection['caption']
+    else:
+        return "Please provide a driving video to check.", None
+
+    output_file = os.path.join(OUTPUT_DIR, f'{OUTNAME}_cross_act', src_name, f'{src_name}_{dst_name}', f'{src_name}_{dst_name}_video.mp4')
     print('Try to find => ' + output_file)
 
     if not os.path.exists(output_file):
-        return "Still processing... You can leave but keep this page open. ⏳", None
-        
+        return "Still processing... You can check progress again later. ⏳", None
+
     return "Processing completed successfully! 🎉", output_file
 
-def generate_from_selection(source_selection, driven_selection, progress=gr.Progress()):
 
-    if not source_selection or not driven_selection:
-        return "Please select a source character and a driving video.", None, None
-    
-    progress(0.01, desc="Detection of selection, preparing to start generation....")
+def run_master_process(source_selection, source_upload, driven_selection, driven_upload, progress=gr.Progress()):
+    """
+    A master function to handle all combinations of gallery/upload for source and driven inputs.
+    """
+    print("\n--- run_master_process called ---")
+    print(f"source_selection (from gallery): {source_selection}")
+    print(f"source_upload (from upload):   {source_upload}")
+    print(f"driven_selection (from gallery): {driven_selection}")
+    print(f"driven_upload (from upload):   {driven_upload}")
+    print("---------------------------------\n")
     
     try:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
+        # --- 1. Input Validation ---
+        has_source = source_selection is not None or source_upload is not None
+        has_driven = driven_selection is not None or driven_upload is not None
+        if not has_source or not has_driven:
+            return "Error: Please provide both a source and a driving input.", None
+        
+        progress(0.01, desc="Preparing...")
+        
+        # --- 2. Setup Paths and Commands ---
+        current_dir = os.path.dirname(os.path.abspath(__file__)) if '__file__' in locals() else os.getcwd()
         output_dir = os.path.join(current_dir, OUTPUT_DIR)
-        my_run_cmd = partial(run_cmd, current_dir=current_dir)
+        tracker_dir = os.path.join(current_dir, EHM_TRACKER_DIR)
         
-        src_img_root = os.path.join(current_dir, TRACKED_IMG_DIR, source_selection['caption'])
-        dcv_vid_root = os.path.join(current_dir, TRACKED_VID_DIR, driven_selection['caption'])
-        
-        if not os.path.exists(src_img_root):
-            return f"Error: Unable to find source character data path {src_img_root}", None
-        if not os.path.exists(dcv_vid_root):
-            return f"Error: Unable to find driven video data path {dcv_vid_root}", None
+        cmd_in_basedir = partial(run_cmd, current_dir=current_dir)
+        cmd_in_tracker = partial(run_cmd, current_dir=tracker_dir)
 
+        tracked_source_image_dir = os.path.join(output_dir, 'tracked_source_image')
+        tracked_driven_video_dir = os.path.join(output_dir, 'tracked_driven_video')
+        os.makedirs(tracked_source_image_dir, exist_ok=True)
+        os.makedirs(tracked_driven_video_dir, exist_ok=True)
+
+        # --- 3. Resolve Source Input ---
+        progress(0.05, desc="☕️ Processing source...")
+        if source_upload:
+            print("Processing uploaded source image...")
+            source_image_fp = os.path.abspath(source_upload)
+            src_name = os.path.splitext(os.path.basename(source_image_fp))[0]
+            src_img_root = os.path.join(tracked_source_image_dir, src_name)
+            
+            if os.path.exists(os.path.join(src_img_root, 'optim_tracking_ehm.pkl')):
+                print(f'🐶 Uploaded source image "{src_name}" has been processed before, skipping tracking.')
+            else:
+                cmd_in_tracker(f'python -m src.tracking_single_image -i "{source_image_fp}" -o "{tracked_source_image_dir}"')
+        else: # A gallery item was selected
+            src_name = source_selection['caption']
+            src_img_root = os.path.join(current_dir, TRACKED_IMG_DIR, src_name)
+            print(f"Using pre-tracked source from gallery: {src_name}")
+            if not os.path.exists(src_img_root):
+                return f"Error: Unable to find source character data path {src_img_root}", None
+        
+        progress(0.2, desc="✅ Source processed.")
+
+        # --- 4. Resolve Driven Input ---
+        progress(0.25, desc="☕️ Processing driven video (can take a while)...")
+        if driven_upload:
+            print("Processing uploaded driven video...")
+            driven_video_fp = os.path.abspath(driven_upload)
+            dst_name = os.path.splitext(os.path.basename(driven_video_fp))[0]
+            dcv_vid_root = os.path.join(tracked_driven_video_dir, dst_name)
+
+            if os.path.exists(os.path.join(dcv_vid_root, 'optim_tracking_ehm.pkl')):
+                 print(f'🐶 Uploaded driven video "{dst_name}" has been processed before, skipping tracking.')
+            else:
+                cmd_in_tracker(f'python tracking_video.py -i "{driven_video_fp}" -o "{tracked_driven_video_dir}" --check_hand_score 0.0 -p 0,1 -n 1 -v 0')
+        else: # A gallery item was selected
+            dst_name = driven_selection['caption']
+            dcv_vid_root = os.path.join(current_dir, TRACKED_VID_DIR, dst_name)
+            print(f"Using pre-tracked driven video from gallery: {dst_name}")
+            if not os.path.exists(dcv_vid_root):
+                 return f"Error: Unable to find driven video data path {dcv_vid_root}", None
+        
+        progress(0.65, desc="✅ Driven video processed. Starting final generation...")
+
+        # --- 5. Generate Final Avatar ---
         print('⚡️ Initiating GUAVA generation results, please wait...')
-        src_name = source_selection['caption']
-        dst_name = driven_selection['caption']
         output_file = os.path.join(output_dir, f'{OUTNAME}_cross_act', src_name, f'{src_name}_{dst_name}', f'{src_name}_{dst_name}_video.mp4')
         
         if os.path.exists(output_file):
             print(f'🐶 The result already exists, skipping generation....')
         else:
-            my_run_cmd(f'PYTHONPATH=.  python main/test.py -d {DEVICES} -n {OUTNAME} -m assets/GUAVA' + 
-                       f' --source_data_path {src_img_root}'+
-                       f' --data_path {dcv_vid_root} ' +
-                       f' --save_path {output_dir} ' +
-                       f' --skip_self_act --render_cross_act')
+            command = (
+                f'PYTHONPATH=. python main/test.py -d {DEVICES} -n {OUTNAME} -m assets/GUAVA'
+                f' --source_data_path "{src_img_root}"'
+                f' --data_path "{dcv_vid_root}"'
+                f' --save_path "{output_dir}"'
+                f' --skip_self_act --render_cross_act'
+            )
+            cmd_in_basedir(command)
             print(f'Completion! The results are saved in {output_dir}/{OUTNAME}_cross_act')
-        progress(1.0, desc="🎉 complete! ")
-        
-        return "🎉 complete! ", output_file
             
+        progress(1.0, desc="🎉 Complete!")
+        return "🎉 Processing complete!", output_file
+
     except Exception as e:
         return f"An error occurred: {str(e)}", None
-    
+
+
+# --- History and Gallery Functions ---
 def get_history_videos():
-    """Get all previously generated videos from results directory"""
+    """Get all previously generated videos and format them for a gr.Gallery."""
     results = []
-    base_dir = F"{OUTPUT_DIR}/{OUTNAME}_cross_act"
+    base_dir = f"{OUTPUT_DIR}/{OUTNAME}_cross_act"
     if not os.path.exists(base_dir):
-        return "No history found", None
+        return []
         
-    for source_dir in os.listdir(base_dir):
+    for source_dir in sorted(os.listdir(base_dir)):
         source_path = os.path.join(base_dir, source_dir)
         if os.path.isdir(source_path):
-            for driven_dir in os.listdir(source_path):
+            for driven_dir in sorted(os.listdir(source_path)):
                 driven_path = os.path.join(source_path, driven_dir)
                 if os.path.isdir(driven_path):
                     videos = list(Path(driven_path).glob("*.mp4"))
                     for video in videos:
-                        results.append({
-                            "source": source_dir,
-                            "driven": driven_dir,
-                            "video": str(video)
-                        })
+                        label = f"Source: {source_dir}\nDriven: {driven_dir[len(source_dir)+1:]}"
+                        results.append((str(video), label))
     
-    if not results:
-        return "No history found", None
-    
-    # Format the results for gallery display
-    video_paths = []
-    video_labels = []
-    for result in results:
-        video_paths.append(result["video"])
-        video_labels.append(f"Source: {result['source']} | Driven: {result['driven'][len(result['source'])+1:]}")
-        
-    return f"Found {len(video_paths)} historical results", (video_paths, video_labels)
-
-def update_history():
-    message, gallery_data = get_history_videos()
-    if gallery_data is None:
-        return message, ""
-    
-    video_paths, video_labels = gallery_data
-    html_content = "<div style='display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; padding: 20px;'>"
-    
-    for video_path, video_label in zip(video_paths, video_labels):
-        html_content += f"""
-        <div style='border: 1px solid #ddd; padding: 10px; border-radius: 8px;'>
-            <video width='100%' controls>
-                <source src='file/{video_path}' type='video/mp4'>
-                Your browser does not support the video tag.
-            </video>
-            <div style='margin-top: 10px; font-weight: bold;'>{video_label}</div>
-        </div>
-        """
-    
-    html_content += "</div>"
-    return message, html_content
+    results.sort(key=lambda x: os.path.getctime(x[0]), reverse=True)
+    return results
 
 def prepare_gallery_data(base_dir):
+    """Prepares image-label pairs for the gr.Gallery component."""
     gallery_list = []
     if not os.path.exists(base_dir):
+        print(f"Warning: Gallery directory not found at {base_dir}")
         return gallery_list
         
     for item_name in sorted(os.listdir(base_dir)):
@@ -168,286 +210,125 @@ def prepare_gallery_data(base_dir):
             if os.path.exists(preview_path):
                 gallery_list.append((preview_path, item_name))
     return gallery_list
-    
-'''  
-def process_avatar(source_image, driven_video, progress=gr.Progress()):
-    if source_image is None or driven_video is None:
-        return "Please upload both source image and driven video.", None, None
-    
-    progress(0.01, desc="Files saved, starting processing...")
-    
-    try:
-        
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        output_dir = os.path.join(current_dir, OUTPUT_DIR)
 
-        my_run_cmd = partial(run_cmd, current_dir=current_dir)
+# --- Gradio Interface ---
 
-        processed_source_image_dir = os.path.join(output_dir, 'processed_source_image')
-        processed_driven_video_dir = os.path.join(output_dir, 'processed_driven_video')
-
-        driven_video_fp = driven_video
-        source_image_fp = source_image
-
-        os.makedirs(processed_source_image_dir, exist_ok=True)
-        os.makedirs(processed_driven_video_dir, exist_ok=True)
-        src_img_root = os.path.join(processed_source_image_dir, os.path.basename(source_image_fp).split('.')[0])
-        dcv_vid_root = os.path.join(processed_driven_video_dir, os.path.basename(driven_video_fp).split('.')[0])
-
-        # process source image and driven video
-        os.chdir(f'{current_dir}/tools/ehm-tracker')
-        print('☕️ Processing source image, please wait...')
-        if os.path.exists(os.path.join(src_img_root, 'optim_tracking_ehm.pkl')):
-            print(f'🐶 Source image has been processed, skipping...')
-        else:
-            my_run_cmd(f'python prepare_data.py -i {source_image_fp} -o {processed_source_image_dir} --no-save_vis')
-        
-        progress(0.3, desc="🐶 Source image has been processed")
-        
-        print('☕️ Processing driven video, please wait...')
-        if os.path.exists(os.path.join(dcv_vid_root, 'optim_tracking_ehm.pkl')):
-            print(f'🐶 Driven video has been processed, skipping...')
-        else:
-            my_run_cmd(f'python prepare_data.py -i {driven_video_fp} -o {processed_driven_video_dir} --no-save_vis')
-        os.chdir(current_dir)
-
-        progress(0.8, desc="🐶 Driven video has been processed")
-
-        # now driven the result
-        print('⚡️ Now driving the result, please wait...')
-        src_name = os.path.splitext(os.path.basename(source_image))[0]
-        dst_name = os.path.splitext(os.path.basename(driven_video))[0]
-        output_file =  os.path.join(output_dir, 'cross_act', src_name, f'{src_name}_{dst_name}', f'{src_name}_{dst_name}_video.mp4')
-        if os.path.exists(output_file):
-            print(f'🐶 Result has been generated, skipping...')
-        else:
-            my_run_cmd(f'PYTHONPATH=.  python main/test.py -s {src_img_root} ' + 
-                                            f' --data_path {dcv_vid_root} ' +
-                                            f' --output_dir {output_dir} -d {DEVICES}' +
-                                            f' --skip_self_act --render_cross_act')
-            print(f'Done! The result is saved in {output_dir}/cross_act')
-
-        progress(1.0, desc="🎉 Done! ")
-        output_file =  os.path.join(output_dir, 'cross_act', src_name, f'{src_name}_{dst_name}', f'{src_name}_{dst_name}_video.mp4')
-        
-        return "🎉 Done! ", output_file
-                
-    except Exception as e:
-        return f"Error occurred: {str(e)}", None
-''' 
-
-'''
-# Create the Gradio interface
-with gr.Blocks(title="GUAVA Avatar Generator", css="""
-    .image-container { position: relative; display: inline-block; }
-    .overlay-button { 
-        position: absolute !important; 
-        top: 50% !important; 
-        left: 50% !important; 
-        transform: translate(-50%, -50%) !important;
-        opacity: 0;
-        transition: opacity 0.3s;
-        background: rgba(0,0,0,0.7) !important;
-        color: white !important;
-        border: none !important;
-    }
-    .image-container:hover .overlay-button { 
-        opacity: 1; 
-    }
-    .scrollable-column {
-        height: 600px !important;
-        overflow-y: auto !important;
-        padding-right: 10px;
-    }
-    .scrollable-column::-webkit-scrollbar {
-        width: 8px;
-    }
-    .scrollable-column::-webkit-scrollbar-track {
-        background: #f1f1f1;
-        border-radius: 4px;
-    }
-    .scrollable-column::-webkit-scrollbar-thumb {
-        background: #888;
-        border-radius: 4px;
-    }
-    .scrollable-column::-webkit-scrollbar-thumb:hover {
-        background: #555;
-    }
-""") as demo:
-    
-    with gr.Row():
-        with gr.Column(scale=1):
-            gr.Image("figures/guava.png", show_label=False, height=100, container=False, interactive=False)
-        with gr.Column(scale=5):
-            gr.Markdown("""
-            # GUAVA: Generalizable Upper Body 3D Gaussian Avatar
-            Upload a source image and a driving video to generate an animated 3D Upperbody avatar.
-            """)
-    
-    with gr.Row():
-        with gr.Column():
-            source_image = gr.Image(label="Source Image", type="filepath", height=600)
-            driven_video = gr.Video(label="Driving Video")
-            process_btn = gr.Button("Animate Avatar", variant="primary")
-        
-        with gr.Column():
-            output_message = gr.Textbox(label="Status (Processing takes ~a few mins, you can leave but keep this page open)")
-            output_video = gr.Video(label="Generated Animation")
-            check_btn = gr.Button("Check Progress 🔄", variant="secondary")
-            
-            with gr.Row():
-                process_btn.click(
-                        fn=process_avatar,
-                        inputs=[source_image, driven_video],
-                        outputs=[output_message, output_video]
-                    )
-                
-                check_btn.click(
-                    fn=check_process_status,
-                    inputs=[source_image, driven_video],
-                    outputs=[output_message, output_video]
-                )
-    
-    gr.Markdown("---")
-    with gr.Row():
-        with gr.Column(scale=3):
-            gr.Markdown("### Example Source Images (Click to use)")
-            with gr.Row(elem_classes=["scrollable-column"]):
-                example_images = [f for f in os.listdir("assets/demo/images") if f.endswith(('.png', '.jpg', '.jpeg'))]
-                for img in example_images:
-                    img_path = f"assets/demo/images/{img}"
-                    with gr.Column(elem_classes=["image-container"]):
-                        gr.Image(value=img_path, show_label=True, label=img, height=250)
-                        select_img_btn = gr.Button("Use this image", size="sm", elem_classes=["overlay-button"])
-                        select_img_btn.click(
-                            fn=lambda x=img_path: x,
-                            outputs=[source_image]
-                        )
-
-        with gr.Column(scale=1):
-            gr.Markdown("### Example Driving Videos")
-            example_videos = [f for f in os.listdir("assets/demo/videos") if f.endswith(('.mp4', '.avi', '.mov'))]
-            with gr.Row(elem_classes=["scrollable-column"]):
-                for video in example_videos:
-                    video_path = f"assets/demo/videos/{video}"
-                    with gr.Column():
-                        gr.Video(value=video_path, show_label=False, width=300)
-                        select_vid_btn = gr.Button("Use this video ➡️", size="sm")
-                        select_vid_btn.click(
-                            fn=lambda x=video_path: x,
-                            outputs=[driven_video]
-                        )
-    
-    gr.Markdown("---")
-    with gr.Row(elem_classes=["scrollable-column"]):
-        with gr.Column():
-            gr.Markdown("### History Viewer")
-            history_message = gr.Textbox(label="History Status")
-            view_history_btn = gr.Button("View History 📜", variant="secondary")
-            history_html = gr.HTML()
-            
-            view_history_btn.click(
-                fn=update_history,
-                inputs=[],
-                outputs=[history_message, history_html]
-            )
-'''
-
-with gr.Blocks(title="GUAVA Avatar Generator", css="""...""") as demo:
-    source_gallery_data = prepare_gallery_data(TRACKED_IMG_DIR)
-    video_gallery_data = prepare_gallery_data(TRACKED_VID_DIR)
-    selected_source = gr.State(None)
-    selected_video = gr.State(None)
-    
+with gr.Blocks(title="GUAVA Avatar Generator", theme=gr.themes.Soft()) as demo:
     with gr.Row():
         with gr.Column(scale=1):
             gr.Image("assets/Docs/guava.png", show_label=False, height=100, container=False, interactive=False)
         with gr.Column(scale=5):
             gr.Markdown("""
             # GUAVA: Generalizable Upper Body 3D Gaussian Avatar
-            **[Demo Version]** Please select a character and a driving video from the galleries below to generate an animated avatar.
+            Generate an animated avatar by selecting a pre-processed character and driving video, or by uploading your own. 
             """)
-
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("### 1. Select a Source Character")
-            source_gallery = gr.Gallery(
-                value=source_gallery_data, 
-                label="Source Characters", 
-                columns=3, 
-                height="auto",
-                object_fit="contain"
-            )
-        with gr.Column():
-            gr.Markdown("### 2. Select a Driving Video")
-            video_gallery = gr.Gallery(
-                value=video_gallery_data, 
-                label="Driving Videos", 
-                columns=3, 
-                height="auto",
-                object_fit="contain"
-            )
             
-    with gr.Row():
-        with gr.Column(scale=1):
-            process_btn = gr.Button("Generate Animated Avatar", variant="primary")
-            check_btn = gr.Button("Check Progress 🔄", variant="secondary")
+    with gr.Row():#equal_height=True
+        with gr.Column(scale=3):
+            gr.Markdown("## Create GUAVA Avatar")
+            source_gallery_data = prepare_gallery_data(TRACKED_IMG_DIR)
+            video_gallery_data = prepare_gallery_data(TRACKED_VID_DIR)
+            selected_source = gr.State(None)
+            selected_video = gr.State(None)
+
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("### 1. Choose Source Character")
+                    with gr.Tabs() as source_tabs:
+                        with gr.TabItem("From Gallery"):
+                            source_gallery = gr.Gallery(value=source_gallery_data, label="Source Characters", columns=3, height="auto", object_fit="contain")
+                        with gr.TabItem("Upload Image"):
+                            upload_source_image = gr.Image(label="Source Image", type="filepath", height=400)
+                with gr.Column():
+                    gr.Markdown("### 2. Choose Driving Video")
+                    with gr.Tabs() as driven_tabs:
+                        with gr.TabItem("From Gallery"):
+                            video_gallery = gr.Gallery(value=video_gallery_data, label="Driving Videos", columns=3, height="auto", object_fit="contain")
+                        with gr.TabItem("Upload Video"):
+                            upload_driven_video = gr.Video(label="Driving Video", height=400)
+            
+            gr.Markdown("**Note:** Processing custom uploads takes significantly longer due to tracking steps. A 10-second video can take over 6 minutes to process.")
+            
+            with gr.Row():
+                generate_btn = gr.Button("Generate Animation", variant="primary", size="lg")
+                check_btn = gr.Button("Check Progress 🔄", variant="secondary")
+
         with gr.Column(scale=2):
-            output_message = gr.Textbox(label="Status (Processing takes ~a few mins. You can leave but keep this page open)")
+            gr.Markdown("## GUAVA Generation")
+            output_message = gr.Textbox(label="Status", value="Welcome! Select your inputs and click Generate.", lines=2)
             output_video = gr.Video(label="Generated Animation", width=500)
-            
-    def handle_source_select(evt: gr.SelectData):
-        print(f"Selected source character: {evt.value}")
-        return evt.value
 
-    def handle_video_select(evt: gr.SelectData):
-        print(f"Selected driving video: {evt.value}")
-        return evt.value
-
-    source_gallery.select(
-        fn=handle_source_select,
-        inputs=None,
-        outputs=selected_source
-    )
+    with gr.Accordion("📜 Generation History", open=False):
+        history_gallery = gr.Gallery(label="Previously Generated Videos", show_label=False, columns=4, object_fit="contain", height="auto")
+        view_history_btn = gr.Button("Refresh History")
     
-    video_gallery.select(
-        fn=handle_video_select,
-        inputs=None,
-        outputs=selected_video
-    )
+    # --- Event Handlers ---
 
-    process_btn.click(
-        fn=generate_from_selection,
-        inputs=[selected_source, selected_video],
+    # --- CHANGE START: Made gallery selection handler an explicit function for clarity and debugging ---
+    def on_gallery_select(evt: gr.SelectData):
+        """Fires when a user selects an item from a gallery. Prints and returns the selection."""
+        if evt.value:
+            print(f"✅ Gallery item selected: {evt.value['caption']}")
+            return evt.value
+        return None
+
+    source_gallery.select(on_gallery_select, None, selected_source, show_progress="hidden")
+    video_gallery.select(on_gallery_select, None, selected_video, show_progress="hidden")
+    # --- CHANGE END ---
+
+    # --- CHANGE START: Reworked tab switching logic to be more explicit with state handling ---
+    def handle_source_tab_change(selected_tab_index, current_selection):
+        if selected_tab_index == 1: 
+            return None, gr.update()  
+        else: 
+            return current_selection, None  
+
+    def handle_driven_tab_change(selected_tab_index, current_selection):
+        if selected_tab_index == 1:
+            return None, gr.update()  
+        else: 
+            return current_selection, None  
+
+    source_tabs.select(
+        fn=handle_source_tab_change,
+        inputs=[source_tabs, selected_source],  # Pass current state in
+        outputs=[selected_source, upload_source_image],
+        show_progress="hidden"
+    )
+    driven_tabs.select(
+        fn=handle_driven_tab_change,
+        inputs=[driven_tabs, selected_video],  # Pass current state in
+        outputs=[selected_video, upload_driven_video],
+        show_progress="hidden"
+    )
+    # --- CHANGE END ---
+
+    generate_btn.click(
+        fn=run_master_process,
+        inputs=[selected_source, upload_source_image, selected_video, upload_driven_video],
         outputs=[output_message, output_video]
     )
-    
     check_btn.click(
-        fn=check_process_status,
-        inputs=[selected_source, selected_video],
+        fn=master_check_status,
+        inputs=[selected_source, upload_source_image, selected_video, upload_driven_video],
         outputs=[output_message, output_video]
     )
+    view_history_btn.click(fn=get_history_videos, outputs=history_gallery)
+    demo.load(fn=get_history_videos, outputs=history_gallery)
 
-    gr.Markdown("---")
-    
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("### 📜 History Viewer")
-            history_message = gr.Textbox(label="History Status", interactive=False)
-            view_history_btn = gr.Button("View Generation History")
-            history_html = gr.HTML() 
-            
-            view_history_btn.click(
-                fn=update_history,
-                inputs=[],
-                outputs=[history_message, history_html]
-            )
-    
+# --- Launch the App ---
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--share", action="store_true", help="Whether to share the app.")
     args = parser.parse_args()
-
-    demo.launch(server_name="0.0.0.0", allowed_paths=[".",OUTPUT_DIR], share=args.share,)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    
+    allowed_paths = [".", OUTPUT_DIR, TRACKED_IMG_DIR, TRACKED_VID_DIR, EHM_TRACKER_DIR]
+    
+    demo.launch(
+        server_name="0.0.0.0", 
+        allowed_paths=allowed_paths, 
+        share=args.share,
+    )
