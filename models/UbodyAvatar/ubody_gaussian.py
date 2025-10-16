@@ -186,17 +186,45 @@ class Ubody_Gaussian(L.LightningModule):
         self._smplx_features_color[...,:3]=torch.sigmoid(self._smplx_features_color[...,:3])
         self._uv_features_color[...,:3]=torch.sigmoid(self._uv_features_color[...,:3])
         
-        self.smplx=None
+        self.ehm = EHM(self.cfg.flame_assets_dir, self.cfg.smplx_assets_dir, add_teeth=True, uv_size=self.cfg.uvmap_size)
+        self.smplx = self.ehm.smplx
+
         self._canoical=False
         if pruning:
             self.prune_gaussians()
             
-    def init_ehm(self,ehm=None):
-        if ehm is None:
-            self.ehm=EHM(self.cfg.flame_assets_dir,self.cfg.smplx_assets_dir,self.cfg.mano_assets_dir,add_teeth=True,uv_size=self.cfg.uvmap_size).to(self._smplx_xyz.device)
-        else:
-            self.ehm=ehm.to(self._smplx_xyz.device) 
-        self.smplx=self.ehm.smplx
+    def to(self, *args, **kwargs):
+        # First, call the original .to() method to move registered parameters and buffers
+        super().to(*args, **kwargs)
+
+        # Get the target device from the arguments
+        device = args[0] if args else kwargs.get('device')
+
+        # Manually move all the unregistered tensor attributes
+        self._smplx_scaling = self._smplx_scaling.to(device)
+        self._smplx_rotation = self._smplx_rotation.to(device)
+        self._smplx_opacity = self._smplx_opacity.to(device)
+        self._smplx_xyz = self._smplx_xyz.to(device)
+        if self._smplx_offset is not None:
+            self._smplx_offset = self._smplx_offset.to(device)
+        self._uv_scaling = self._uv_scaling.to(device)
+        self._uv_rotation = self._uv_rotation.to(device)
+        self._uv_opacity = self._uv_opacity.to(device)
+        self._uv_local_xyz = self._uv_local_xyz.to(device)
+        self._uv_binding_face = self._uv_binding_face.to(device)
+        self._uv_face_bary = self._uv_face_bary.to(device)
+        self._smplx_features_color = self._smplx_features_color.to(device)
+        self._uv_features_color = self._uv_features_color.to(device)
+        
+        # Ensure the nested ehm model is also moved
+        if self.ehm is not None:
+            self.ehm.to(device)
+            
+        return self
+
+    def init_ehm(self, ehm_state_dict=None):
+        if ehm_state_dict is not None:
+            self.ehm.load_state_dict(ehm_state_dict)
 
     def prune_gaussians(self):
         #prune gaussians with opacity less than threshold
@@ -219,7 +247,7 @@ class Ubody_Gaussian(L.LightningModule):
         #smplx vertex gaussians
         batch_size=self._smplx_xyz.shape[0]
         deformed_assets={}
-        smplx_deform_res=self.ehm(batch['smplx_coeffs'],batch['flame_coeffs'],static_offset=self._smplx_offset)
+        smplx_deform_res=self.ehm(batch['smplx_coeffs'],batch['flame_coeffs'])
 
         self._smplx_xyz_deform=smplx_deform_res["vertices"]
         d_deform_rot_xyzw=rotmat_to_unitquat(smplx_deform_res["ver_transform_mat"][:,:,:3,:3])

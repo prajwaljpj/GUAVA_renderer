@@ -131,7 +131,7 @@ class EHM(nn.Module):
             new_template_vertices[:, self.smplx.smplx2mano_ind['left_hand']] = left_hand_vert
             new_template_vertices[:, self.smplx.smplx2mano_ind['right_hand']] = right_hand_vert
 
-        vertices, joints_transform,joints,ver_transform_mat,joint_transform_mat = lbs_wobeta( full_pose, new_template_vertices,#
+        vertices, joints_transform,joints,ver_transform_mat,joint_transform_mat = lbs_wobeta( full_pose, new_template_vertices,
                                             self.smplx.posedirs,       
                                             self.smplx.J_regressor, self.smplx.parents,       # J_regressor([55, 10475])
                                             self.smplx.lbs_weights,joints_offset=joints_offset, dtype=self.smplx.dtype)   # template_vertices（10475x3）
