@@ -148,6 +148,35 @@ Once your dataset is prepared, run the following command to train your own GUAVA
 python main/train.py -c train/ubody_512 -d '0,1'
 ```
 
+## Helpers
+
+Convert motion scripts (FLAME and SMPL-X). Make sure to change the paths internally in the `convert_motion.py` script 
+
+``` shell
+python convert_motion.py
+```
+
+Creating Ubody avatar
+
+``` shell
+python create_avatar.py --model_path assets/GUAVA --data_path /path/to/your/data/ --source_video_id video_id --output_avatar_path path/to/my_avatar.pt
+```
+
+Rendering your motion to the Ubody avatar. make sure both motion sets are 25/30 FPS.
+
+``` shell
+python render_motion.py --smplx_path path/to/smplx/motion/smplx.npz --flame_path path/to/flame/motion/flame.npy --output_path talking_video.mp4
+```
+
+If you want to resample motion use `resample_motion.py`. Change the file paths in the code first.
+
+``` shell
+python resample_motion.py
+```
+
+`
+
+
 
 ## 🖥️ Interface Demo
 After setting up the environment, necessary files, and the EHM-Tracker, you can try our interactive demo by running:
