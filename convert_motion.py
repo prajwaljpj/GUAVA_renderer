@@ -37,8 +37,8 @@ def convert_motion_data():
     artalk_path = '/home/prajwaljpj/projects/talking_video/ARTalk/render_results/motion_data/ElevenLabs_TTS_E_M_long_motion.pt'
     emage_path = '/home/prajwaljpj/projects/talking_video/PantoMatrix/examples/motion_zoom/ElevenLabs_TTS_E_M_long_output.npz'
     
-    output_motion_path = 'assets/example/custom_video/my_animation/optim_tracking_custom.pkl'
-    output_identity_path = 'assets/example/custom_video/my_animation/id_share_params.pkl'
+    output_motion_path = 'assets/example/custom_video/my_animation2/optim_tracking_custom.pkl'
+    output_identity_path = 'assets/example/custom_video/my_animation2/id_share_params.pkl'
 
     # --- Define FPS ---
     flame_fps = 25
@@ -91,27 +91,27 @@ def convert_motion_data():
         # --- Process FLAME Data ---
         artalk_frame = artalk_data[i]
         flame_coeffs = {
-            'expression_params': torch.from_numpy(artalk_frame[0:50]),
-            'pose_params': torch.from_numpy(artalk_frame[50:53]),
-            'jaw_params': torch.from_numpy(artalk_frame[53:56]),
-            'neck_pose_params': torch.zeros(3),
-            'eye_pose_params': torch.zeros(6),
-            'eyelid_params': torch.zeros(2),
-            'cam': torch.zeros(3),
-            'camera_RT_params': torch.eye(4)[:3]
+            'expression_params': artalk_frame[0:50],
+            'pose_params': artalk_frame[50:53],
+            'jaw_params': artalk_frame[53:56],
+            'neck_pose_params': np.zeros(3),
+            'eye_pose_params': np.zeros(6),
+            'eyelid_params': np.zeros(2),
+            'cam': np.zeros(3),
+            'camera_RT_params': np.eye(4)[:3]
         }
 
         # --- Process Resampled SMPL-X Data ---
         smplx_poses = smplx_poses_resampled[i].reshape(55, 3)
         
         smplx_coeffs = {
-            'exp': torch.from_numpy(smplx_expr_resampled[i, :50]),
-            'global_pose': torch.from_numpy(smplx_poses[0]),
-            'body_pose': torch.from_numpy(smplx_poses[1:22]),
-            'body_cam': torch.from_numpy(smplx_trans_resampled[i]),
-            'left_hand_pose': torch.from_numpy(smplx_poses[25:40]),
-            'right_hand_pose': torch.from_numpy(smplx_poses[40:55]),
-            'camera_RT_params': torch.eye(4)[:3]
+            'exp': smplx_expr_resampled[i, :50],
+            'global_pose': smplx_poses[0],
+            'body_pose': smplx_poses[1:22],
+            'body_cam': smplx_trans_resampled[i],
+            'left_hand_pose': smplx_poses[25:40],
+            'right_hand_pose': smplx_poses[40:55],
+            'camera_RT_params': np.eye(4)[:3]
         }
 
         converted_motion[frame_key] = {
